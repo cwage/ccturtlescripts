@@ -2,6 +2,13 @@
 Tree Chopper v1.0
 A turtle script to traverse N chunks and chop down all trees encountered
 
+*** IMPORTANT DISCLAIMER ***
+This script was written by Claude 4 Sonnet AI and may contain bugs, 
+unexpected behavior, or other issues. Use at your own risk and always 
+test thoroughly before deploying on important worlds or systems.
+The AI cannot guarantee perfect functionality or compatibility with 
+all Minecraft/CC:Tweaked versions and configurations.
+
 Usage: treechopper -chunks <N> [-replant] [-chest <side>] [-restore]
 
 Features:
