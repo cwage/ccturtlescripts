@@ -23,10 +23,10 @@ rednetEnabled = false --Default rednet on or off  [Default false]
 dropSide = "front" --Side it will eject to when full or done [Default "front"]
 careAboutResources = true --Will not stop mining once inventory full if false [Default true]
 doCheckFuel = true --Perform fuel check [Default true]
-doRefuel = true --Whenever it comes to start location will attempt to refuel from inventory [Default false]
+doRefuel = true --Whenever it comes to start location will attempt to refuel from inventory [Default true]
 invCheckFreq = 10 --Will check for inventory full every <-- moved spaces [Default 10]
 keepOpen = 1 --How many inventory slots it will attempt to keep open at all times [Default 1]
-fuelSafety = "safe" --How much fuel it will ask for: safe, moderate, and loose [Default moderate]
+fuelSafety = "safe" --How much fuel it will ask for: safe, moderate, and loose [Default safe]
 saveFile = "Civil_Quarry_Restore" --Where it saves restore data [Default "Civil_Quarry_Restore"]
 doBackup = true --If it will keep backups for session persistence [Default true]
 --Standard number slots for fuel (you shouldn't care)
@@ -131,7 +131,7 @@ local tArgs = {...}
 
 local totals = {cobble = 0, fuel = 0, other = 0} -- Total for display (cannot go inside function)
 local function count() --Done any time inventory dropped and at end
-slot = {}        --1: Cobble 2: Fuel 3:Other
+local slot = {}        --1: Cobble 2: Fuel 3:Other
 for i=1, 16 do   --[1] is type, [2] is number
 slot[i] = {}
 slot[i][2] = turtle.getItemCount(i)
@@ -546,7 +546,6 @@ end
 function attack(doAdd, func)
   doAdd = doAdd or true
   func = func or turtle.attack
-  local didAttack
   if func() then
     if doAdd then 
       attacked = attacked + 1
@@ -692,7 +691,7 @@ if yPos < y then --Will go down after if above position
 end
 turnTo(toFace,"right")
 saveProgress()
-gotoX,gotoY,gotoZ,gotoFacing = nil
+gotoX,gotoY,gotoZ,gotoFacing = nil, nil, nil, nil
 end
 function drop(side, final, allowSkip)
 side = sides[side] or "front"    --The final number means that it will
@@ -709,8 +708,8 @@ if doRefuel then
 end
 if side == "right" then turnTo(1) end
 if side == "left" then turnTo(3) end
-local whereDetect, whereDrop1, whereDropAll
 local _1 = slot[1][2] - final --All but one if final, all if not final
+local whereDetect, whereDrop
 if side == "top" then
 whereDetect = turtle.detectUp ; whereDrop = turtle.dropUp
 elseif side == "bottom" then
