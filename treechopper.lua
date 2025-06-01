@@ -550,7 +550,11 @@ local function chopTree(treeInfo)
                 turtle.digUp()
                 woodChopped = woodChopped + 1
                 blocksChopped = blocksChopped + 1
-                smartUp()
+                
+                -- Simple up movement - no need for smart movement during tree chopping
+                turtle.up()
+                yPos = yPos + 1
+                saveProgress()
                 
                 -- No leaf cleanup during chopping - just focus on wood
                 -- Leaves will decay naturally or can be cleaned up later if needed
