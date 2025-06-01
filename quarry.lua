@@ -73,7 +73,7 @@ Examples [2]:
  If you wanted start a quarry that has 
  rednet on channels 500 and 501, outputs 
  to a chest below itself, is inverted,
- and has the dimesions 5x5x21, then here
+ and has the dimensions 5x5x21, then here
  is what you would type: (Remember that
  order does not matter)
  ----------
@@ -89,7 +89,7 @@ Examples [3]:
  ---------
  Followed by any other arguments
 Tips:
- You don't actually have to type out "false" or "true" if you don't want. It actaully just checks if the first
+ You don't actually have to type out "false" or "true" if you don't want. It actually just checks if the first
  letter is "t", so you (usually) don't have to put anything at all. Putting the whole word just helps with clarity
 Internal Config: 
  At the top of the program, right below the changelog is a written config. Anything not specified by arguments
@@ -222,7 +222,7 @@ end
 
 if not (tArgs["-DEFAULT"] or restoreFound) then
 local section = "Dimensions"
---Dimesnions
+--Dimensions
 if tArgs["-dim"] then local num = tArgs["-dim"];
 x = checkNum(tArgs[num + 1],section); z = checkNum(tArgs[num + 2],section); y = checkNum(tArgs[num + 3],section)
 else
@@ -238,7 +238,7 @@ y = math.floor(math.abs(tonumber(io.read()) or y))
 end
 changedT.new("x",x); changedT.new("z",z); changedT.new("y",y)
 assert(x~=0, errorT.zero, section); assert(z~=0, errorT.zero, section); assert(y~=0, errorT.zero, section)
-assert(not(x == 1 and y == 1 and z == 1) ,"1, 1, 1 dosen't work well at all, try again", section)
+assert(not(x == 1 and y == 1 and z == 1) ,"1, 1, 1 doesn't work well at all, try again", section)
 if not tArgs["-vanilla"] then
 --Invert
 if tArgs["-invert"] then
@@ -305,7 +305,7 @@ if type(b) ~= "function" then
 file.write(a.." = "..tostring(b).."\n")
 end
 end
-file.write("doCheckFuel = false\n") --It has already used fuel, so calculation unnesesary
+file.write("doCheckFuel = false\n") --It has already used fuel, so calculation unnecessary
 if type(extras) == "table" then
   for a, b in pairs(extras) do
     file.write(a.." = "..tostring(b))
@@ -664,8 +664,8 @@ function turnTo(num, dir)
     elseif dir == "right" then
       right()
     else
-      error("TurnTo: Left or Right expected, got "..tosrting(dir))
-      end
+      error("TurnTo: Left or Right expected, got "..tostring(dir))
+    end
   end
 end
 function goto(x,z,y, toFace)
