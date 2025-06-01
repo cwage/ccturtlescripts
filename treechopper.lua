@@ -551,13 +551,11 @@ local function chopTree(treeInfo)
                 woodChopped = woodChopped + 1
                 blocksChopped = blocksChopped + 1
                 
-                -- Simple up movement - no need for smart movement during tree chopping
+                -- Simple up movement - absolutely no other function calls
                 turtle.up()
                 yPos = yPos + 1
-                saveProgress()
+                -- Don't save progress during tree chopping to avoid any side effects
                 
-                -- No leaf cleanup during chopping - just focus on wood
-                -- Leaves will decay naturally or can be cleaned up later if needed
             else
                 if upSuccess then
                     print("Non-wood block above: " .. (upData.name or "unknown"))
@@ -568,6 +566,9 @@ local function chopTree(treeInfo)
             end
         end
         print("Finished chopping upward, total wood: " .. woodChopped)
+        
+        -- Save progress only once after tree chopping is complete
+        saveProgress()
         
         -- Return to the exact original position
         print("Returning to original position: " .. originalX .. "," .. originalY .. "," .. originalZ)
@@ -590,7 +591,6 @@ local function chopTree(treeInfo)
         end
         
         print("Chopped " .. woodChopped .. " wood blocks")
-        saveProgress()
         return woodChopped
     else
         print("No wood found at expected location - tree may have been removed")
