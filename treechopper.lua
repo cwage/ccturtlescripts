@@ -570,11 +570,75 @@ local function chopTree(treeInfo)
         -- Save progress only once after tree chopping is complete
         saveProgress()
         
-        -- Return to the exact original position
+        -- Return to the exact original position using simple movement
         print("Returning to original position: " .. originalX .. "," .. originalY .. "," .. originalZ)
         print("Current position before return: " .. xPos .. "," .. yPos .. "," .. zPos)
-        goTo(originalX, originalZ, originalY)
+        
+        -- Simple return movement - don't use goTo() which calls smartForward()
+        -- Move to target Y first
+        while yPos > originalY do
+            turtle.down()
+            yPos = yPos - 1
+        end
+        while yPos < originalY do
+            turtle.up()
+            yPos = yPos + 1
+        end
+        
+        -- Move to target X
+        while xPos ~= originalX do
+            if xPos < originalX then
+                turnTo(1) -- Face East
+            else
+                turnTo(3) -- Face West
+            end
+            -- Simple forward movement without obstacle detection
+            if turtle.forward() then
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            else
+                -- Only dig if we absolutely can't move
+                turtle.dig()
+                turtle.forward()
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            end
+        end
+        
+        -- Move to target Z
+        while zPos ~= originalZ do
+            if zPos < originalZ then
+                turnTo(0) -- Face North
+            else
+                turnTo(2) -- Face South
+            end
+            -- Simple forward movement without obstacle detection
+            if turtle.forward() then
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            else
+                -- Only dig if we absolutely can't move
+                turtle.dig()
+                turtle.forward()
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            end
+        end
+        
         turnTo(originalFacing)
+        saveProgress()
         print("Successfully returned to original position and facing")
         
         -- Plant sapling if replanting is enabled
