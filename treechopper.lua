@@ -244,6 +244,167 @@ local function findGroundLevel()
     return groundY
 end
 
+local function chopTree(treeInfo)
+    print("Chopping tree at " .. treeInfo.x .. "," .. treeInfo.y .. "," .. treeInfo.z)
+    
+    -- Store our current position before tree chopping
+    local originalX, originalY, originalZ = xPos, yPos, zPos
+    local originalFacing = facing
+    
+    -- Face the tree direction
+    turnTo(treeInfo.direction)
+    
+    -- Verify there's still wood in front of us
+    local success, blockData = turtle.inspect()
+    if success and isWood(blockData) then
+        print("Confirmed wood block ahead, starting to chop...")
+        
+        -- Dig the base block
+        turtle.dig()
+        blocksChopped = blocksChopped + 1
+        
+        -- Move into the tree position to chop upward
+        turtle.forward()
+        if treeInfo.direction == 0 then zPos = zPos + 1
+        elseif treeInfo.direction == 1 then xPos = xPos + 1
+        elseif treeInfo.direction == 2 then zPos = zPos - 1
+        elseif treeInfo.direction == 3 then xPos = xPos - 1
+        end
+        saveProgress()
+        
+        local treeBase = yPos
+        
+        -- Check if we need to go down to find the real base
+        while true do
+            local downSuccess, downData = turtle.inspectDown()
+            if downSuccess and isWood(downData) then
+                turtle.digDown()
+                blocksChopped = blocksChopped + 1
+                turtle.down()
+                yPos = yPos - 1
+                treeBase = yPos
+            else
+                break
+            end
+        end
+        
+        -- Now chop upward
+        local woodChopped = 1 -- Already chopped the base
+        local maxHeight = 30
+        
+        print("Starting upward chop from base level " .. treeBase)
+        for height = 0, maxHeight do
+            local upSuccess, upData = turtle.inspectUp()
+            if upSuccess and isWood(upData) then
+                print("Found wood above at height " .. (height + 1) .. ", chopping...")
+                turtle.digUp()
+                woodChopped = woodChopped + 1
+                blocksChopped = blocksChopped + 1
+                
+                -- Simple up movement
+                turtle.up()
+                yPos = yPos + 1
+                
+            else
+                if upSuccess then
+                    print("Non-wood block above: " .. (upData.name or "unknown"))
+                else
+                    print("No block above, reached top of tree")
+                end
+                break
+            end
+        end
+        print("Finished chopping upward, total wood: " .. woodChopped)
+        
+        -- Save progress after tree chopping is complete
+        saveProgress()
+        
+        -- Return to the exact original position using simple movement
+        print("Returning to original position: " .. originalX .. "," .. originalY .. "," .. originalZ)
+        
+        -- Move to target Y first
+        while yPos > originalY do
+            turtle.down()
+            yPos = yPos - 1
+        end
+        while yPos < originalY do
+            turtle.up()
+            yPos = yPos + 1
+        end
+        
+        -- Move to target X
+        while xPos ~= originalX do
+            if xPos < originalX then
+                turnTo(1) -- Face East
+            else
+                turnTo(3) -- Face West
+            end
+            if turtle.forward() then
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            else
+                turtle.dig()
+                turtle.forward()
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            end
+        end
+        
+        -- Move to target Z
+        while zPos ~= originalZ do
+            if zPos < originalZ then
+                turnTo(0) -- Face North
+            else
+                turnTo(2) -- Face South
+            end
+            if turtle.forward() then
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            else
+                turtle.dig()
+                turtle.forward()
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+            end
+        end
+        
+        turnTo(originalFacing)
+        saveProgress()
+        print("Successfully returned to original position and facing")
+        
+        -- Plant sapling if replanting is enabled
+        if replant then
+            turtle.select(saplingSlot)
+            if turtle.getItemCount(saplingSlot) > 0 then
+                turnTo(treeInfo.direction)
+                turtle.place()
+                print("Planted sapling")
+                turnTo(originalFacing)
+            else
+                print("No saplings available for replanting")
+            end
+        end
+        
+        print("Chopped " .. woodChopped .. " wood blocks")
+        return woodChopped
+    else
+        print("No wood found at expected location - tree may have been removed")
+        return 0
+    end
+end
+
 local function smartForward()
     print("Smart moving forward from " .. xPos .. "," .. zPos .. " facing " .. facing)
     
@@ -292,33 +453,141 @@ local function smartForward()
     local success, blockData = turtle.inspect()
     if success then
         if isWood(blockData) then
-            print("Wood block ahead - will be handled by tree chopping")
-            turtle.dig()
-        elseif isGround(blockData) then
-            print("Ground/hill ahead - attempting to climb")
-            -- Try to climb over the obstacle
-            if turtle.up() then
-                yPos = yPos + 1
+            print("Wood block ahead - chopping entire tree now!")
+            -- We found a tree during navigation - chop it completely
+            local treeInfo = {
+                x = xPos + (facing == 1 and 1 or (facing == 3 and -1 or 0)),
+                z = zPos + (facing == 0 and 1 or (facing == 2 and -1 or 0)),
+                y = yPos,
+                direction = facing
+            }
+            chopTree(treeInfo)
+            -- After chopping, try to move forward again
+            if turtle.forward() then
+                if facing == 0 then zPos = zPos + 1
+                elseif facing == 1 then xPos = xPos + 1
+                elseif facing == 2 then zPos = zPos - 1
+                elseif facing == 3 then xPos = xPos - 1
+                end
+                print("Moved forward after chopping tree")
                 saveProgress()
+                return true
+            end
+        elseif isGround(blockData) then
+            print("Ground/hill ahead - attempting to climb intelligently")
+            
+            -- Try to climb over the obstacle, but be smarter about it
+            local climbHeight = 0
+            local maxClimbHeight = 3 -- Maximum height to climb
+            local canClimb = true
+            
+            -- Check how high we need to climb
+            while climbHeight < maxClimbHeight and canClimb do
+                local upSuccess, upData = turtle.inspectUp()
+                if upSuccess then
+                    if isWood(upData) then
+                        print("Tree detected above at height +" .. (climbHeight + 1) .. " - clearing path only")
+                        -- Just clear the path, don't count as chopped wood since we're not doing full tree processing
+                        turtle.digUp()
+                        -- Don't increment blocksChopped here - this is just path clearing
+                    elseif isGround(upData) or isLeaves(upData) then
+                        print("Ground/leaves above at height +" .. (climbHeight + 1) .. " - can dig through")
+                        turtle.digUp()
+                    else
+                        print("Unknown block above: " .. (upData.name or "unknown") .. " - digging")
+                        turtle.digUp()
+                    end
+                end
+                
+                -- Try to move up
+                if turtle.up() then
+                    yPos = yPos + 1
+                    climbHeight = climbHeight + 1
+                    saveProgress()
+                    print("Climbed to height +" .. climbHeight)
+                    
+                    -- Check if we can now move forward
+                    local forwardSuccess, forwardData = turtle.inspect()
+                    if not forwardSuccess then
+                        -- Clear path ahead, try to move forward
+                        if turtle.forward() then
+                            if facing == 0 then zPos = zPos + 1
+                            elseif facing == 1 then xPos = xPos + 1
+                            elseif facing == 2 then zPos = zPos - 1
+                            elseif facing == 3 then xPos = xPos - 1
+                            end
+                            print("Successfully climbed over obstacle to " .. xPos .. "," .. zPos)
+                            saveProgress()
+                            return true
+                        end
+                    elseif forwardSuccess and isWood(forwardData) then
+                        print("Found wood at this height - chopping tree!")
+                        -- Calculate tree position
+                        local treeX = xPos + (facing == 1 and 1 or (facing == 3 and -1 or 0))
+                        local treeZ = zPos + (facing == 0 and 1 or (facing == 2 and -1 or 0))
+                        local treeInfo = {x = treeX, z = treeZ, y = yPos, direction = facing}
+                        chopTree(treeInfo)
+                        -- Try to move forward after chopping
+                        if turtle.forward() then
+                            if facing == 0 then zPos = zPos + 1
+                            elseif facing == 1 then xPos = xPos + 1
+                            elseif facing == 2 then zPos = zPos - 1
+                            elseif facing == 3 then xPos = xPos - 1
+                            end
+                            print("Moved forward after chopping tree at height +" .. climbHeight)
+                            saveProgress()
+                            return true
+                        end
+                    elseif forwardSuccess and not isGround(forwardData) then
+                        print("Non-ground obstacle at height +" .. climbHeight .. " - digging")
+                        turtle.dig()
+                        if turtle.forward() then
+                            if facing == 0 then zPos = zPos + 1
+                            elseif facing == 1 then xPos = xPos + 1
+                            elseif facing == 2 then zPos = zPos - 1
+                            elseif facing == 3 then xPos = xPos - 1
+                            end
+                            print("Moved forward after clearing obstacle at height +" .. climbHeight)
+                            saveProgress()
+                            return true
+                        end
+                    end
+                    -- Still blocked, continue climbing
+                else
+                    print("Can't climb higher - obstacle above")
+                    canClimb = false
+                end
+            end
+            
+            -- If we climbed but still can't move forward, we're probably at max height
+            if climbHeight > 0 then
+                print("Reached maximum climb height (" .. climbHeight .. "), trying to move forward anyway")
+                -- Try to dig through whatever is in front
+                turtle.dig()
                 if turtle.forward() then
-                    -- Successfully climbed over
                     if facing == 0 then zPos = zPos + 1
                     elseif facing == 1 then xPos = xPos + 1
                     elseif facing == 2 then zPos = zPos - 1
                     elseif facing == 3 then xPos = xPos - 1
                     end
-                    print("Climbed over obstacle to " .. xPos .. "," .. zPos)
+                    print("Moved forward after digging at elevated height")
                     saveProgress()
                     return true
-                else
-                    -- Still can't move, go back down and dig
-                    turtle.down()
-                    yPos = yPos - 1
-                    turtle.dig()
                 end
             else
-                -- Can't go up, just dig through
+                -- Couldn't climb at all, fall back to digging through (last resort)
+                print("Cannot climb over obstacle, digging through as last resort")
                 turtle.dig()
+                if turtle.forward() then
+                    if facing == 0 then zPos = zPos + 1
+                    elseif facing == 1 then xPos = xPos + 1
+                    elseif facing == 2 then zPos = zPos - 1
+                    elseif facing == 3 then xPos = xPos - 1
+                    end
+                    print("Moved forward after digging through obstacle")
+                    saveProgress()
+                    return true
+                end
             end
         elseif isLeaves(blockData) then
             print("Leaves ahead - trying to move through")
@@ -495,191 +764,42 @@ local function needsDropOff()
     return freeSlots < 3 -- Drop off when less than 3 free slots
 end
 
-local function chopTree(treeInfo)
-    print("Chopping tree at " .. treeInfo.x .. "," .. treeInfo.y .. "," .. treeInfo.z)
-    
-    -- Store our current position before tree chopping
-    local originalX, originalY, originalZ = xPos, yPos, zPos
-    local originalFacing = facing
-    
-    -- Face the tree direction
-    turnTo(treeInfo.direction)
-    
-    -- Verify there's still wood in front of us
+local function quickScanForWood()
+    -- Quick scan in current direction at multiple Y levels
+    -- Check current level
     local success, blockData = turtle.inspect()
     if success and isWood(blockData) then
-        print("Confirmed wood block ahead, starting to chop...")
-        
-        -- Dig the base block
-        turtle.dig()
-        blocksChopped = blocksChopped + 1
-        
-        -- Move into the tree position to chop upward
-        turtle.forward()
-        if treeInfo.direction == 0 then zPos = zPos + 1
-        elseif treeInfo.direction == 1 then xPos = xPos + 1
-        elseif treeInfo.direction == 2 then zPos = zPos - 1
-        elseif treeInfo.direction == 3 then xPos = xPos - 1
-        end
-        saveProgress()
-        
-        local treeBase = yPos
-        
-        -- Check if we need to go down to find the real base
-        while true do
-            local downSuccess, downData = turtle.inspectDown()
-            if downSuccess and isWood(downData) then
-                turtle.digDown()
-                blocksChopped = blocksChopped + 1
-                smartDown()
-                treeBase = yPos
-            else
-                break
-            end
-        end
-        
-        -- Now chop upward
-        local woodChopped = 1 -- Already chopped the base
-        local maxHeight = 30
-        
-        print("Starting upward chop from base level " .. treeBase)
-        for height = 0, maxHeight do
-            local upSuccess, upData = turtle.inspectUp()
-            if upSuccess and isWood(upData) then
-                print("Found wood above at height " .. (height + 1) .. ", chopping...")
-                turtle.digUp()
-                woodChopped = woodChopped + 1
-                blocksChopped = blocksChopped + 1
-                
-                -- Simple up movement - absolutely no other function calls
-                turtle.up()
-                yPos = yPos + 1
-                -- Don't save progress during tree chopping to avoid any side effects
-                
-            else
-                if upSuccess then
-                    print("Non-wood block above: " .. (upData.name or "unknown"))
-                else
-                    print("No block above, reached top of tree")
-                end
-                break
-            end
-        end
-        print("Finished chopping upward, total wood: " .. woodChopped)
-        
-        -- Save progress only once after tree chopping is complete
-        saveProgress()
-        
-        -- Return to the exact original position using simple movement
-        print("Returning to original position: " .. originalX .. "," .. originalY .. "," .. originalZ)
-        print("Current position before return: " .. xPos .. "," .. yPos .. "," .. zPos)
-        
-        -- Simple return movement - don't use goTo() which calls smartForward()
-        -- Move to target Y first
-        while yPos > originalY do
-            turtle.down()
-            yPos = yPos - 1
-        end
-        while yPos < originalY do
-            turtle.up()
-            yPos = yPos + 1
-        end
-        
-        -- Move to target X
-        while xPos ~= originalX do
-            if xPos < originalX then
-                turnTo(1) -- Face East
-            else
-                turnTo(3) -- Face West
-            end
-            -- Simple forward movement without obstacle detection
-            if turtle.forward() then
-                if facing == 0 then zPos = zPos + 1
-                elseif facing == 1 then xPos = xPos + 1
-                elseif facing == 2 then zPos = zPos - 1
-                elseif facing == 3 then xPos = xPos - 1
-                end
-            else
-                -- Only dig if we absolutely can't move
-                turtle.dig()
-                turtle.forward()
-                if facing == 0 then zPos = zPos + 1
-                elseif facing == 1 then xPos = xPos + 1
-                elseif facing == 2 then zPos = zPos - 1
-                elseif facing == 3 then xPos = xPos - 1
-                end
-            end
-        end
-        
-        -- Move to target Z
-        while zPos ~= originalZ do
-            if zPos < originalZ then
-                turnTo(0) -- Face North
-            else
-                turnTo(2) -- Face South
-            end
-            -- Simple forward movement without obstacle detection
-            if turtle.forward() then
-                if facing == 0 then zPos = zPos + 1
-                elseif facing == 1 then xPos = xPos + 1
-                elseif facing == 2 then zPos = zPos - 1
-                elseif facing == 3 then xPos = xPos - 1
-                end
-            else
-                -- Only dig if we absolutely can't move
-                turtle.dig()
-                turtle.forward()
-                if facing == 0 then zPos = zPos + 1
-                elseif facing == 1 then xPos = xPos + 1
-                elseif facing == 2 then zPos = zPos - 1
-                elseif facing == 3 then xPos = xPos - 1
-                end
-            end
-        end
-        
-        turnTo(originalFacing)
-        saveProgress()
-        print("Successfully returned to original position and facing")
-        
-        -- Plant sapling if replanting is enabled
-        if replant then
-            turtle.select(saplingSlot)
-            if turtle.getItemCount(saplingSlot) > 0 then
-                turnTo(treeInfo.direction)
-                turtle.place()
-                print("Planted sapling")
-                turnTo(originalFacing) -- Return to original facing
-            else
-                print("No saplings available for replanting")
-            end
-        end
-        
-        print("Chopped " .. woodChopped .. " wood blocks")
-        return woodChopped
-    else
-        print("No wood found at expected location - tree may have been removed")
-        return 0
+        return true
     end
-end
-
-local function quickScanForWood()
-    -- Quick scan in current direction only - no turning
-    local success, blockData = turtle.inspect()
-    return success and isWood(blockData)
+    
+    -- Check below (tree base might be lower)
+    local downSuccess, downData = turtle.inspectDown()
+    if downSuccess and isWood(downData) then
+        return true
+    end
+    
+    -- Check above (tree might extend upward)
+    local upSuccess, upData = turtle.inspectUp()
+    if upSuccess and isWood(upData) then
+        return true
+    end
+    
+    return false
 end
 
 local function fullScanForTrees()
-    -- Full 360 scan only when we know there's wood nearby
+    -- Full 360 scan at multiple Y levels - but don't move the turtle!
     local treesFound = {}
     local originalFacing = facing
     
-    print("Doing full tree scan...")
+    print("Doing full tree scan at multiple levels...")
     
-    -- Check in all 4 directions
+    -- Check in all 4 directions at current level, above, and below
     for dir = 0, 3 do
         turnTo(dir)
-        local success, blockData = turtle.inspect()
         
+        -- Check current level
+        local success, blockData = turtle.inspect()
         if success and isWood(blockData) then
             local treeX, treeZ = xPos, zPos
             if dir == 0 then treeZ = treeZ + 1
@@ -699,7 +819,7 @@ local function fullScanForTrees()
             
             if not alreadyFound then
                 table.insert(treesFound, {x = treeX, z = treeZ, y = yPos, direction = dir})
-                print("Found tree at " .. treeX .. "," .. yPos .. "," .. treeZ)
+                print("Found tree at " .. treeX .. "," .. yPos .. "," .. treeZ .. " (current level)")
             end
         end
     end
@@ -715,23 +835,71 @@ local function processPosition(x, z)
     -- Move to the position
     goTo(x, z)
     
-    -- Quick check first - no turning required
+    -- Multi-level tree detection - check current level and nearby levels
+    local foundWood = false
+    local woodLevels = {}
+    
+    -- Check current level first
     if quickScanForWood() then
-        print("Wood detected, doing full scan...")
-        local trees = fullScanForTrees()
+        foundWood = true
+        table.insert(woodLevels, yPos)
+        print("Wood detected at current level " .. yPos)
+    end
+    
+    -- Check one level down
+    local downSuccess, downData = turtle.inspectDown()
+    if downSuccess and isWood(downData) then
+        foundWood = true
+        table.insert(woodLevels, yPos - 1)
+        print("Wood detected one level down at " .. (yPos - 1))
+    end
+    
+    -- Check one level up  
+    local upSuccess, upData = turtle.inspectUp()
+    if upSuccess and isWood(upData) then
+        foundWood = true
+        table.insert(woodLevels, yPos + 1)
+        print("Wood detected one level up at " .. (yPos + 1))
+    end
+    
+    if foundWood then
+        print("Wood detected at multiple levels, processing trees...")
         
-        -- Chop any trees found
-        for _, tree in ipairs(trees) do
-            if needsDropOff() then
-                dropItems()
-                goTo(x, z) -- Return to current position
+        -- Process trees at each detected level
+        for _, woodY in ipairs(woodLevels) do
+            -- Move to the level where wood was detected
+            if woodY < yPos then
+                print("Moving down to tree level " .. woodY)
+                smartDown()
+            elseif woodY > yPos then
+                print("Moving up to tree level " .. woodY)
+                smartUp()
             end
             
-            chopTree(tree)
+            -- Now do full scan at this level
+            local trees = fullScanForTrees()
+            
+            -- Chop any trees found at this level
+            for _, tree in ipairs(trees) do
+                if needsDropOff() then
+                    dropItems()
+                    goTo(x, z) -- Return to current position
+                    -- Re-adjust to the correct level
+                    while yPos ~= woodY do
+                        if yPos < woodY then smartUp()
+                        else smartDown() end
+                    end
+                end
+                
+                chopTree(tree)
+            end
         end
+        
+        -- Return to ground level after processing all trees
+        findGroundLevel()
     else
-        -- No wood detected in current direction, skip full scan
-        print("No wood detected, skipping scan")
+        -- No wood detected at any level, skip
+        print("No wood detected at any level, skipping scan")
     end
     
     -- Check if we need to drop off items
@@ -835,7 +1003,7 @@ local function parseArgs()
             if validSides[args[i+1]] then
                 chestSide = args[i+1]
             else
-                print("ERROR: Invalid chest side '" .. args[i+1] .. "'. Valid options: top, bottom, front, left, right")
+                print("ERROR: Invalid chest side '" .. args[i+1] .. "'. Valid options: top, bottom, front")
                 return false
             end
             i = i + 2
