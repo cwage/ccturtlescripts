@@ -14,7 +14,7 @@ Features:
 
 -- Configuration defaults
 local chunks = 1
-local replantSaplings = false
+local replant = false
 local chestSide = "bottom"
 local saveFile = "treechopper_save"
 local doBackup = true
@@ -122,9 +122,33 @@ local function isSapling(itemName)
     return false
 end
 
+local function isLeaves(blockData)
+    if not blockData then return false end
+    local leafTypes = {
+        "minecraft:oak_leaves",
+        "minecraft:birch_leaves",
+        "minecraft:spruce_leaves",
+        "minecraft:jungle_leaves",
+        "minecraft:acacia_leaves",
+        "minecraft:dark_oak_leaves",
+        "minecraft:mangrove_leaves",
+        "minecraft:cherry_leaves"
+    }
+    for _, leafType in ipairs(leafTypes) do
+        if blockData.name == leafType then
+            return true
+        end
+    end
+    return false
+end
+
 local function saveProgress()
     if not doBackup then return end
     local file = fs.open(saveFile, "w")
+    if not file then
+        print("Warning: Could not save progress to file")
+        return
+    end
     file.write("xPos = " .. xPos .. "\n")
     file.write("yPos = " .. yPos .. "\n") 
     file.write("zPos = " .. zPos .. "\n")
@@ -156,29 +180,177 @@ local function turnTo(targetFacing)
     end
 end
 
-local function forward()
-    print("Moving forward from " .. xPos .. "," .. zPos .. " facing " .. facing)
-    while not turtle.forward() do
-        if turtle.detect() then
-            print("Obstacle detected, digging...")
-            turtle.dig()
-        else
-            print("Attacking entity...")
-            turtle.attack()
+-- Terrain-aware movement functions
+local function isGround(blockData)
+    if not blockData then return false end
+    local groundBlocks = {
+        "minecraft:dirt", "minecraft:grass_block", "minecraft:stone", 
+        "minecraft:cobblestone", "minecraft:sand", "minecraft:gravel",
+        "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:mycelium",
+        "minecraft:snow_block", "minecraft:clay", "minecraft:terracotta"
+    }
+    for _, groundType in ipairs(groundBlocks) do
+        if blockData.name == groundType then
+            return true
         end
-        sleep(0.1)
     end
-    
-    if facing == 0 then zPos = zPos + 1
-    elseif facing == 1 then xPos = xPos + 1
-    elseif facing == 2 then zPos = zPos - 1
-    elseif facing == 3 then xPos = xPos - 1
-    end
-    print("Moved to " .. xPos .. "," .. zPos)
-    saveProgress()
+    return false
 end
 
-local function up()
+local function findGroundLevel()
+    -- Look down to find ground level, but don't be too aggressive
+    local groundY = yPos
+    local maxDown = 2 -- Further reduced - only go down 2 blocks max
+    
+    -- First check if we're already at a good level
+    local success, blockData = turtle.inspectDown()
+    if success and isGround(blockData) then
+        -- We're already at ground level
+        return groundY
+    end
+    
+    -- Only go down if there's air below us, and be very conservative
+    for i = 1, maxDown do
+        local success, blockData = turtle.inspectDown()
+        if success then
+            -- There's a block below, stop here
+            break
+        else
+            -- Air below, go down to check
+            if turtle.down() then
+                yPos = yPos - 1
+                groundY = yPos
+                saveProgress()
+                
+                -- Check if we found ground now
+                local newSuccess, newBlockData = turtle.inspectDown()
+                if newSuccess and isGround(newBlockData) then
+                    print("Found ground at level " .. groundY)
+                    return groundY
+                elseif not newSuccess then
+                    -- Still air below after going down - this is likely a cave/hole
+                    print("Detected cave/hole, climbing back up to avoid going too deep")
+                    turtle.up()
+                    yPos = yPos + 1
+                    saveProgress()
+                    return yPos
+                end
+            else
+                break
+            end
+        end
+    end
+    
+    return groundY
+end
+
+local function smartForward()
+    print("Smart moving forward from " .. xPos .. "," .. zPos .. " facing " .. facing)
+    
+    -- First, try normal forward movement
+    if turtle.forward() then
+        -- Update position
+        if facing == 0 then zPos = zPos + 1
+        elseif facing == 1 then xPos = xPos + 1
+        elseif facing == 2 then zPos = zPos - 1
+        elseif facing == 3 then xPos = xPos - 1
+        end
+        print("Moved to " .. xPos .. "," .. zPos)
+        saveProgress()
+        
+        -- Check if we need to adjust height for terrain following
+        local success, blockData = turtle.inspectDown()
+        if not success then
+            -- Air below - we might have walked off a cliff or into a hole
+            print("Air detected below, checking for safe ground level...")
+            
+            -- Try going down one block to see if there's ground
+            if turtle.down() then
+                yPos = yPos - 1
+                saveProgress()
+                
+                local newSuccess, newBlockData = turtle.inspectDown()
+                if newSuccess and isGround(newBlockData) then
+                    -- Found ground one block down, this is fine
+                    print("Found ground one level down")
+                    return true
+                else
+                    -- Still air below or non-ground block - this might be a cave/hole
+                    print("Detected deep hole or cave, returning to surface level")
+                    turtle.up()
+                    yPos = yPos + 1
+                    saveProgress()
+                    return true
+                end
+            end
+        end
+        
+        return true
+    end
+    
+    -- Can't move forward, check what's blocking
+    local success, blockData = turtle.inspect()
+    if success then
+        if isWood(blockData) then
+            print("Wood block ahead - will be handled by tree chopping")
+            turtle.dig()
+        elseif isGround(blockData) then
+            print("Ground/hill ahead - attempting to climb")
+            -- Try to climb over the obstacle
+            if turtle.up() then
+                yPos = yPos + 1
+                saveProgress()
+                if turtle.forward() then
+                    -- Successfully climbed over
+                    if facing == 0 then zPos = zPos + 1
+                    elseif facing == 1 then xPos = xPos + 1
+                    elseif facing == 2 then zPos = zPos - 1
+                    elseif facing == 3 then xPos = xPos - 1
+                    end
+                    print("Climbed over obstacle to " .. xPos .. "," .. zPos)
+                    saveProgress()
+                    return true
+                else
+                    -- Still can't move, go back down and dig
+                    turtle.down()
+                    yPos = yPos - 1
+                    turtle.dig()
+                end
+            else
+                -- Can't go up, just dig through
+                turtle.dig()
+            end
+        elseif isLeaves(blockData) then
+            print("Leaves ahead - trying to move through")
+            turtle.dig() -- Leaves do block movement, so we need to dig them
+        else
+            print("Unknown obstacle ahead (" .. (blockData.name or "unknown") .. ") - digging...")
+            turtle.dig()
+        end
+        
+        -- Try moving again after clearing obstacle
+        if turtle.forward() then
+            if facing == 0 then zPos = zPos + 1
+            elseif facing == 1 then xPos = xPos + 1
+            elseif facing == 2 then zPos = zPos - 1
+            elseif facing == 3 then xPos = xPos - 1
+            end
+            print("Moved to " .. xPos .. "," .. zPos .. " after clearing obstacle")
+            saveProgress()
+            return true
+        end
+    else
+        -- No block detected but can't move - probably an entity
+        print("Entity blocking path, attacking...")
+        turtle.attack()
+        sleep(0.1)
+        return smartForward() -- Retry
+    end
+    
+    return false
+end
+
+local function smartUp()
     print("Moving up from y=" .. yPos)
     while not turtle.up() do
         if turtle.detectUp() then
@@ -195,7 +367,7 @@ local function up()
     saveProgress()
 end
 
-local function down()
+local function smartDown()
     print("Moving down from y=" .. yPos)
     while not turtle.down() do
         if turtle.detectDown() then
@@ -213,29 +385,53 @@ local function down()
 end
 
 local function goTo(targetX, targetZ, targetY)
-    targetY = targetY or yPos
+    print("Going to " .. targetX .. "," .. targetZ .. "," .. (targetY or "ground level"))
     
-    -- Move to target Y first
-    while yPos < targetY do up() end
-    while yPos > targetY do down() end
+    -- If no target Y specified, we'll follow terrain
+    local followTerrain = (targetY == nil)
     
     -- Move to target X
-    if xPos < targetX then
-        turnTo(1) -- Face East
-        while xPos < targetX do forward() end
-    elseif xPos > targetX then
-        turnTo(3) -- Face West
-        while xPos > targetX do forward() end
+    while xPos ~= targetX do
+        if xPos < targetX then
+            turnTo(1) -- Face East
+        else
+            turnTo(3) -- Face West
+        end
+        smartForward()
+        
+        -- Check fuel periodically during long moves
+        if turtle.getFuelLevel() ~= "unlimited" and turtle.getFuelLevel() < 100 then
+            print("Low fuel during movement, attempting to refuel...")
+            refuelFromInventory()
+        end
     end
     
     -- Move to target Z
-    if zPos < targetZ then
-        turnTo(0) -- Face North
-        while zPos < targetZ do forward() end
-    elseif zPos > targetZ then
-        turnTo(2) -- Face South
-        while zPos > targetZ do forward() end
+    while zPos ~= targetZ do
+        if zPos < targetZ then
+            turnTo(0) -- Face North
+        else
+            turnTo(2) -- Face South
+        end
+        smartForward()
+        
+        -- Check fuel periodically during long moves
+        if turtle.getFuelLevel() ~= "unlimited" and turtle.getFuelLevel() < 100 then
+            print("Low fuel during movement, attempting to refuel...")
+            refuelFromInventory()
+        end
     end
+    
+    -- Move to target Y if specified, otherwise stay at ground level
+    if not followTerrain and targetY then
+        while yPos < targetY do smartUp() end
+        while yPos > targetY do smartDown() end
+    else
+        -- Make sure we're at ground level
+        findGroundLevel()
+    end
+    
+    print("Arrived at " .. xPos .. "," .. yPos .. "," .. zPos)
 end
 
 local function returnHome()
@@ -253,12 +449,25 @@ local function dropItems()
         turtle.select(slot)
         local item = turtle.getItemDetail()
         if item and not isSapling(item.name) then
+            local success = false
             if chestSide == "top" then
-                turtle.dropUp()
+                success = turtle.dropUp()
             elseif chestSide == "bottom" then
-                turtle.dropDown()
-            else
-                turtle.drop()
+                success = turtle.dropDown()
+            elseif chestSide == "front" then
+                success = turtle.drop()
+            elseif chestSide == "left" then
+                turnTo((homeFacing + 3) % 4) -- Turn left
+                success = turtle.drop()
+                turnTo(homeFacing) -- Turn back
+            elseif chestSide == "right" then
+                turnTo((homeFacing + 1) % 4) -- Turn right
+                success = turtle.drop()
+                turnTo(homeFacing) -- Turn back
+            end
+            
+            if not success then
+                print("Warning: Could not drop items from slot " .. slot)
             end
         end
     end
@@ -286,86 +495,198 @@ local function needsDropOff()
     return freeSlots < 3 -- Drop off when less than 3 free slots
 end
 
-local function chopTree(startX, startZ)
-    print("Chopping tree at " .. startX .. "," .. startZ)
-    local originalY = yPos
-    local woodFound = true
-    local maxHeight = 0
+local function chopTree(treeInfo)
+    print("Chopping tree at " .. treeInfo.x .. "," .. treeInfo.y .. "," .. treeInfo.z)
     
-    -- Chop upward following the tree
-    while woodFound do
-        woodFound = false
-        local success, blockData = turtle.inspectUp()
-        
-        if success and isWood(blockData) then
-            turtle.digUp()
-            up()
-            maxHeight = maxHeight + 1
-            woodFound = true
-            blocksChopped = blocksChopped + 1
-            
-            -- Check surrounding blocks for more wood
-            for dir = 0, 3 do
-                turnTo(dir)
-                local success2, blockData2 = turtle.inspect()
-                if success2 and isWood(blockData2) then
-                    turtle.dig()
-                    forward()
-                    chopTree(xPos, zPos) -- Recursive call for connected wood
-                    -- Return to previous position
-                    turnTo((dir + 2) % 4)
-                    forward()
-                    turnTo(dir)
-                end
-            end
-        end
-        
-        if maxHeight > 50 then break end -- Safety limit
-    end
+    -- Store our current position before tree chopping
+    local originalX, originalY, originalZ = xPos, yPos, zPos
+    local originalFacing = facing
     
-    -- Return to ground level
-    goTo(startX, startZ, originalY)
+    -- Face the tree direction
+    turnTo(treeInfo.direction)
     
-    -- Plant sapling if enabled and we have one
-    if replantSaplings then
-        turtle.select(saplingSlot)
-        if turtle.getItemCount(saplingSlot) > 0 then
-            local success, blockData = turtle.inspectDown()
-            if success and (blockData.name == "minecraft:dirt" or 
-                           blockData.name == "minecraft:grass_block" or
-                           blockData.name == "minecraft:podzol") then
-                turtle.placeDown()
-                print("Planted sapling")
-            end
-        end
-    end
-    
-    turtle.select(1)
-end
-
-local function scanAndChop()
-    -- Check current position for wood
+    -- Verify there's still wood in front of us
     local success, blockData = turtle.inspect()
     if success and isWood(blockData) then
+        print("Confirmed wood block ahead, starting to chop...")
+        
+        -- Dig the base block
         turtle.dig()
-        forward()
-        chopTree(xPos, zPos)
-        -- Move back
-        turnTo((facing + 2) % 4)
-        forward()
-        turnTo((facing + 2) % 4)
         blocksChopped = blocksChopped + 1
-    end
-    
-    -- Check above for hanging wood
-    success, blockData = turtle.inspectUp()
-    if success and isWood(blockData) then
-        chopTree(xPos, zPos)
+        
+        -- Move into the tree position to chop upward
+        turtle.forward()
+        if treeInfo.direction == 0 then zPos = zPos + 1
+        elseif treeInfo.direction == 1 then xPos = xPos + 1
+        elseif treeInfo.direction == 2 then zPos = zPos - 1
+        elseif treeInfo.direction == 3 then xPos = xPos - 1
+        end
+        saveProgress()
+        
+        local treeBase = yPos
+        
+        -- Check if we need to go down to find the real base
+        while true do
+            local downSuccess, downData = turtle.inspectDown()
+            if downSuccess and isWood(downData) then
+                turtle.digDown()
+                blocksChopped = blocksChopped + 1
+                smartDown()
+                treeBase = yPos
+            else
+                break
+            end
+        end
+        
+        -- Now chop upward
+        local woodChopped = 1 -- Already chopped the base
+        local maxHeight = 30
+        
+        print("Starting upward chop from base level " .. treeBase)
+        for height = 0, maxHeight do
+            local upSuccess, upData = turtle.inspectUp()
+            if upSuccess and isWood(upData) then
+                print("Found wood above at height " .. (height + 1) .. ", chopping...")
+                turtle.digUp()
+                woodChopped = woodChopped + 1
+                blocksChopped = blocksChopped + 1
+                smartUp()
+                
+                -- No leaf cleanup during chopping - just focus on wood
+                -- Leaves will decay naturally or can be cleaned up later if needed
+            else
+                if upSuccess then
+                    print("Non-wood block above: " .. (upData.name or "unknown"))
+                else
+                    print("No block above, reached top of tree")
+                end
+                break
+            end
+        end
+        print("Finished chopping upward, total wood: " .. woodChopped)
+        
+        -- Return to the exact original position
+        print("Returning to original position: " .. originalX .. "," .. originalY .. "," .. originalZ)
+        print("Current position before return: " .. xPos .. "," .. yPos .. "," .. zPos)
+        goTo(originalX, originalZ, originalY)
+        turnTo(originalFacing)
+        print("Successfully returned to original position and facing")
+        
+        -- Plant sapling if replanting is enabled
+        if replant then
+            turtle.select(saplingSlot)
+            if turtle.getItemCount(saplingSlot) > 0 then
+                turnTo(treeInfo.direction)
+                turtle.place()
+                print("Planted sapling")
+                turnTo(originalFacing) -- Return to original facing
+            else
+                print("No saplings available for replanting")
+            end
+        end
+        
+        print("Chopped " .. woodChopped .. " wood blocks")
+        saveProgress()
+        return woodChopped
+    else
+        print("No wood found at expected location - tree may have been removed")
+        return 0
     end
 end
 
-local function traverseChunk(chunkX, chunkZ)
-    print("Traversing chunk " .. currentChunk .. " at chunk coords " .. chunkX .. "," .. chunkZ)
+local function quickScanForWood()
+    -- Quick scan in current direction only - no turning
+    local success, blockData = turtle.inspect()
+    return success and isWood(blockData)
+end
+
+local function fullScanForTrees()
+    -- Full 360 scan only when we know there's wood nearby
+    local treesFound = {}
+    local originalFacing = facing
+    
+    print("Doing full tree scan...")
+    
+    -- Check in all 4 directions
+    for dir = 0, 3 do
+        turnTo(dir)
+        local success, blockData = turtle.inspect()
+        
+        if success and isWood(blockData) then
+            local treeX, treeZ = xPos, zPos
+            if dir == 0 then treeZ = treeZ + 1
+            elseif dir == 1 then treeX = treeX + 1
+            elseif dir == 2 then treeZ = treeZ - 1
+            elseif dir == 3 then treeX = treeX - 1
+            end
+            
+            -- Check if we already found this tree
+            local alreadyFound = false
+            for _, existingTree in ipairs(treesFound) do
+                if existingTree.x == treeX and existingTree.z == treeZ then
+                    alreadyFound = true
+                    break
+                end
+            end
+            
+            if not alreadyFound then
+                table.insert(treesFound, {x = treeX, z = treeZ, y = yPos, direction = dir})
+                print("Found tree at " .. treeX .. "," .. yPos .. "," .. treeZ)
+            end
+        end
+    end
+    
+    -- Return to original facing
+    turnTo(originalFacing)
+    return treesFound
+end
+
+local function processPosition(x, z)
+    print("Processing position " .. x .. "," .. z)
+    
+    -- Move to the position
+    goTo(x, z)
+    
+    -- Quick check first - no turning required
+    if quickScanForWood() then
+        print("Wood detected, doing full scan...")
+        local trees = fullScanForTrees()
+        
+        -- Chop any trees found
+        for _, tree in ipairs(trees) do
+            if needsDropOff() then
+                dropItems()
+                goTo(x, z) -- Return to current position
+            end
+            
+            chopTree(tree)
+        end
+    else
+        -- No wood detected in current direction, skip full scan
+        print("No wood detected, skipping scan")
+    end
+    
+    -- Check if we need to drop off items
+    if needsDropOff() then
+        dropItems()
+    end
+end
+
+local function getChunkCoords(chunkNumber)
+    -- Convert chunk number to spiral coordinates
+    if chunkNumber == 1 then
+        return 0, 0
+    end
+    
+    -- Simple linear pattern for now - can be made spiral later
+    local chunkX = (chunkNumber - 1) % 4
+    local chunkZ = math.floor((chunkNumber - 1) / 4)
+    return chunkX, chunkZ
+end
+
+local function traverseChunk(chunkNumber)
+    local chunkX, chunkZ = getChunkCoords(chunkNumber)
+    print("Traversing chunk " .. chunkNumber .. " at chunk coords " .. chunkX .. "," .. chunkZ)
     
     local startX = chunkX * 16
     local startZ = chunkZ * 16
@@ -378,28 +699,56 @@ local function traverseChunk(chunkX, chunkZ)
             -- Left to right
             for x = 0, 15 do
                 local actualX = startX + x
-                goTo(actualX, actualZ)
-                scanAndChop()
+                processPosition(actualX, actualZ)
                 
                 if needsDropOff() then
                     dropItems()
-                    goTo(actualX, actualZ) -- Return to position
+                    processPosition(actualX, actualZ) -- Return to position
                 end
             end
         else
             -- Right to left
             for x = 15, 0, -1 do
                 local actualX = startX + x
-                goTo(actualX, actualZ)
-                scanAndChop()
+                processPosition(actualX, actualZ)
                 
                 if needsDropOff() then
                     dropItems()
-                    goTo(actualX, actualZ) -- Return to position
+                    processPosition(actualX, actualZ) -- Return to position
                 end
             end
         end
     end
+end
+
+local function loadProgress()
+    if not fs.exists(saveFile) then
+        return false
+    end
+    
+    local file = fs.open(saveFile, "r")
+    if not file then
+        return false
+    end
+    
+    local content = file.readAll()
+    file.close()
+    
+    -- Parse the saved values
+    for line in content:gmatch("[^\r\n]+") do
+        local var, value = line:match("(%w+) = (%d+)")
+        if var and value then
+            if var == "xPos" then xPos = tonumber(value)
+            elseif var == "yPos" then yPos = tonumber(value)
+            elseif var == "zPos" then zPos = tonumber(value)
+            elseif var == "facing" then facing = tonumber(value)
+            elseif var == "currentChunk" then currentChunk = tonumber(value)
+            elseif var == "blocksChopped" then blocksChopped = tonumber(value)
+            end
+        end
+    end
+    
+    return true
 end
 
 -- Argument parsing
@@ -411,15 +760,26 @@ local function parseArgs()
             chunks = tonumber(args[i+1]) or 1
             i = i + 2
         elseif args[i] == "-replant" then
-            replantSaplings = true
+            replant = true
             i = i + 1
         elseif args[i] == "-chest" and args[i+1] then
-            chestSide = args[i+1]
+            local validSides = {top = true, bottom = true, front = true, left = true, right = true}
+            if validSides[args[i+1]] then
+                chestSide = args[i+1]
+            else
+                print("ERROR: Invalid chest side '" .. args[i+1] .. "'. Valid options: top, bottom, front, left, right")
+                return false
+            end
             i = i + 2
         elseif args[i] == "-restore" then
             if fs.exists(saveFile) then
-                dofile(saveFile)
-                print("Restored from save file")
+                if loadProgress() then
+                    print("Restored from save file")
+                else
+                    print("Failed to restore from save file")
+                end
+            else
+                print("No save file found to restore from")
             end
             i = i + 1
         elseif args[i] == "-help" then
@@ -449,72 +809,86 @@ local function main()
     
     print("=== Tree Chopper v1.0 ===")
     print("Chunks to traverse: " .. chunks)
-    print("Replant saplings: " .. tostring(replantSaplings))
+    print("Replant saplings: " .. tostring(replant))
     print("Chest side: " .. chestSide)
     print("")
     
-    -- Check fuel before starting
-    if not ensureFuel() then
-        print("Aborting due to insufficient fuel!")
+    -- Check fuel
+    if not checkFuel() then
+        print("ERROR: Insufficient fuel!")
         return
     end
     
-    print("Starting position: " .. xPos .. "," .. yPos .. "," .. zPos .. " facing " .. facing)
-    
-    -- Store home position
-    homeX, homeY, homeZ, homeFacing = xPos, yPos, zPos, facing
-    print("Home position set to: " .. homeX .. "," .. homeY .. "," .. homeZ .. " facing " .. homeFacing)
-    
-    -- Test movement first
-    print("Testing movement...")
-    print("Current fuel: " .. turtle.getFuelLevel())
-    
-    -- Simple test - move forward and back
-    print("Moving forward 1 block...")
-    forward()
-    print("Moving back...")
-    turnTo((facing + 2) % 4)
-    forward()
-    turnTo((facing + 2) % 4)
-    print("Movement test complete!")
-    
-    -- Traverse chunks in a spiral pattern
-    local chunkX, chunkZ = 0, 0
-    
-    for chunk = currentChunk, chunks do
-        currentChunk = chunk
-        print("Starting chunk " .. chunk .. " of " .. chunks)
-        traverseChunk(chunkX, chunkZ)
+    -- Initialize position and establish ground level
+    if not loadProgress() then
+        print("Starting new session...")
+        homeX, homeY, homeZ = 0, 0, 0
+        xPos, yPos, zPos = 0, 0, 0
+        facing = 0
+        currentChunk = 1
+        homeFacing = 0
         
-        -- Move to next chunk in spiral pattern
-        if chunk < chunks then
-            if chunk == 1 then
-                chunkX = chunkX + 1 -- Move east
-            elseif chunk == 2 then
-                chunkZ = chunkZ + 1 -- Move north
-            elseif chunk == 3 then
-                chunkX = chunkX - 1 -- Move west
-                chunkZ = chunkZ + 1 -- Move north
-            else
-                -- Continue spiral pattern
-                local layer = math.floor(math.sqrt(chunk - 1))
-                -- Complex spiral math here - simplified for now
-                chunkX = chunkX + 1
-            end
+        -- Find and establish ground level
+        print("Establishing ground level...")
+        findGroundLevel()
+        
+        -- Update home position to ground level
+        homeY = yPos
+        
+        saveProgress()
+    else
+        print("Resuming from saved position: " .. xPos .. "," .. yPos .. "," .. zPos)
+        print("Current chunk: " .. currentChunk .. "/" .. chunks)
+        
+        -- Re-establish ground level at current position
+        findGroundLevel()
+    end
+    
+    print("Home position: " .. homeX .. "," .. homeY .. "," .. homeZ)
+    print("Current position: " .. xPos .. "," .. yPos .. "," .. zPos)
+    print("Fuel level: " .. turtle.getFuelLevel())
+    print("")
+    
+    -- Test movement
+    print("Testing movement...")
+    local testSuccess = smartForward()
+    if testSuccess then
+        print("Movement test successful")
+        -- Move back to start
+        turnTo((facing + 2) % 4)
+        smartForward()
+        turnTo((facing + 2) % 4)
+    else
+        print("ERROR: Movement test failed!")
+        return
+    end
+    
+    -- Process each chunk
+    while currentChunk <= chunks do
+        print("=== Processing Chunk " .. currentChunk .. "/" .. chunks .. " ===")
+        traverseChunk(currentChunk)
+        currentChunk = currentChunk + 1
+        saveProgress()
+        
+        -- Check fuel between chunks
+        if turtle.getFuelLevel() ~= "unlimited" and turtle.getFuelLevel() < 500 then
+            print("Low fuel, attempting to refuel...")
+            refuelFromInventory()
         end
     end
     
-    -- Final return home and drop off
+    -- Final return home and cleanup
+    print("=== Job Complete ===")
     dropItems()
+    returnHome()
     
-    print("=== Tree Chopping Complete ===")
+    print("Tree chopping complete!")
     print("Total blocks chopped: " .. blocksChopped)
-    print("Chunks traversed: " .. chunks)
-    print("Final fuel level: " .. turtle.getFuelLevel())
     
     -- Clean up save file
     if fs.exists(saveFile) then
         fs.delete(saveFile)
+        print("Save file cleaned up")
     end
 end
 
