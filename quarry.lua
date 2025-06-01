@@ -130,8 +130,8 @@ local tArgs = {...}
     = 0,   1,   1,   0,     0,      0,    0,    1,       "right",  false,     true,     1,          0,        0,      0
 
 local totals = {cobble = 0, fuel = 0, other = 0} -- Total for display (cannot go inside function)
+local slot = {} -- Inventory slot tracking: 1=Cobble, 2=Fuel, 3=Other
 local function count() --Done any time inventory dropped and at end
-local slot = {}        --1: Cobble 2: Fuel 3:Other
 for i=1, 16 do   --[1] is type, [2] is number
 slot[i] = {}
 slot[i][2] = turtle.getItemCount(i)
